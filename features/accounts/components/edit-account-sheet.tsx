@@ -11,7 +11,7 @@ import { z } from "zod";
 import { useOpenAccount } from "../hooks/use-open-account";
 import { useGetAccount } from "../api/use-get-account";
 import { Loader2 } from "lucide-react";
-import { useEditAccount } from "../api/use-edit-account";
+import { EditAccountSheet } from '../features/accounts/components/edit-account-sheet';
 import { useDeleteAccount } from "../api/use-delete-account";
 import useConfirm from "@/hooks/use-confirm";
 
