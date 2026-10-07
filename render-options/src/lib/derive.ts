@@ -130,11 +130,19 @@ export async function loadMarket(asset: string): Promise<MarketState> {
   };
 }
 
+function expiryDateWire(expiryMs: number): number {
+  const date = new Date(expiryMs);
+  const y = date.getUTCFullYear();
+  const m = String(date.getUTCMonth() + 1).padStart(2, '0');
+  const d = String(date.getUTCDate()).padStart(2, '0');
+  return Number(String(y) + m + d);
+}
+
 export async function loadExpiryTickers(asset: string, expiryMs: number): Promise<Map<string, TickerPoint>> {
   const raw = await publicClient.marketData.getTickers({
     instrumentType: 'option',
     currency: asset,
-    expiryDate: Math.floor(expiryMs / 1000),
+    expiryDate: expiryDateWire(expiryMs),
   });
   return normalizeTickers(raw);
 }
