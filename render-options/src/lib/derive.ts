@@ -226,7 +226,7 @@ async function ensureSepolia() {
   }
 }
 
-async function registerSessionKey(signer: JsonRpcSigner, ownerAddress: string, sessionWallet: Wallet) {
+async function registerSessionKey(signer: JsonRpcSigner, ownerAddress: string, sessionWallet: { address: string; privateKey: string }) {
   const nowSec = Math.floor(Date.now() / 1000);
   const keyExpiry = nowSec + 6 * 60 * 60;
   const signatureExpiry = nowSec + 10 * 60;
