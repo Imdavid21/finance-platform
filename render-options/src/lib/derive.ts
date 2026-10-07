@@ -54,7 +54,7 @@ declare global {
   }
 }
 
-const publicClient = new DeriveClient({ network: NETWORK });
+const publicClient = new DeriveClient({ network: NETWORK, requestTimeoutMs: 8_000 });
 let publicWsConnected = false;
 let tradingSession: TradingSession | null = null;
 
@@ -65,34 +65,26 @@ function n(value: unknown, fallback = 0): number {
   return Number.isFinite(parsed) ? parsed : fallback;
 }
 
-async function optionCount(currency: string): Promise<number> {
-  try {
-    const result = await publicClient.marketData.getInstruments({
-      instrumentType: 'option',
-      currency,
-      pageSize: 1,
-    });
-    return n((result as any)?.pagination?.count, (result as any)?.instruments?.length ?? 0);
-  } catch {
-    return 0;
-  }
-}
-
 export async function loadAssetCatalog(): Promise<AssetSummary[]> {
   const currencies = await publicClient.marketData.getAllCurrencies();
-  const priceMap = new Map<string, any>(currencies.map((c: any) => [String(c.currency).toUpperCase(), c]));
-  const counts = await Promise.all(CANDIDATES.map((symbol) => optionCount(symbol)));
-  return CANDIDATES.map((symbol, index) => {
-    const row = priceMap.get(symbol);
-    const spot = n(row?.spot_price);
-    const spot24h = n(row?.spot_price_24h);
-    return {
-      symbol,
-      spot,
-      change24h: spot24h > 0 ? ((spot / spot24h) - 1) * 100 : 0,
-      optionCount: counts[index],
-    };
-  }).filter((asset) => asset.optionCount > 0 && asset.spot > 0);
+  return (currencies as any[])
+    .filter((row) => row?.option && n(row?.spot_price) > 0)
+    .map((row) => {
+      const spot = n(row?.spot_price);
+      const spot24h = n(row?.spot_price_24h);
+      return {
+        symbol: String(row.currency).toUpperCase(),
+        spot,
+        change24h: spot24h > 0 ? ((spot / spot24h) - 1) * 100 : 0,
+        optionCount: 0,
+      };
+    })
+    .sort((a, b) => {
+      const ia = CANDIDATES.indexOf(a.symbol);
+      const ib = CANDIDATES.indexOf(b.symbol);
+      if (ia >= 0 || ib >= 0) return (ia < 0 ? 999 : ia) - (ib < 0 ? 999 : ib);
+      return a.symbol.localeCompare(b.symbol);
+    });
 }
 
 async function fetchAllOptions(asset: string): Promise<OptionContract[]> {
@@ -103,7 +95,7 @@ async function fetchAllOptions(asset: string): Promise<OptionContract[]> {
       instrumentType: 'option',
       currency: asset,
       page,
-      pageSize: 250,
+      pageSize: 100,
     });
     for (const raw of result?.instruments ?? []) {
       if (raw?.is_active === false) continue;
@@ -119,17 +111,38 @@ async function fetchAllOptions(asset: string): Promise<OptionContract[]> {
 }
 
 export async function loadMarket(asset: string): Promise<MarketState> {
-  const [currencies, options, rawTickers] = await Promise.all([
+  const [currencies, rawTickers] = await Promise.all([
     publicClient.marketData.getAllCurrencies(),
-    fetchAllOptions(asset),
     publicClient.marketData.getTickers({ instrumentType: 'option', currency: asset }),
   ]);
-  const currency = (currencies as any[]).find((c) => String(c.currency).toUpperCase() === asset);
+  const currency = (currencies as any[]).find((row) => String(row.currency).toUpperCase() === asset);
+  const tickers = normalizeTickers(rawTickers);
+
+  // For first paint, derive strike/expiry metadata from the canonical instrument
+  // names returned by get_tickers. Exact venue size constraints are resolved
+  // lazily when a user requests a firm RFQ.
+  let options = [...tickers.keys()]
+    .map((name) => parseOptionInstrument({
+      instrument_name: name,
+      base_currency: asset,
+      tick_size: '0.01',
+      amount_step: '0.01',
+      minimum_amount: '0.01',
+      maximum_amount: '1000000',
+    }))
+    .filter((option): option is OptionContract => Boolean(option));
+
+  // If a venue ever changes its option naming convention, fall back to the
+  // canonical instrument endpoint instead of leaving the builder empty.
+  if (options.length < 2) {
+    options = await fetchAllOptions(asset);
+  }
+
   return {
     asset,
     spot: n(currency?.spot_price),
     options,
-    tickers: normalizeTickers(rawTickers),
+    tickers,
   };
 }
 
@@ -141,11 +154,12 @@ export async function subscribeSpot(asset: string, onPrice: (price: number) => v
   const poll = async () => {
     if (stopped) return;
     try {
-      const ticker: any = await publicClient.marketData.getTicker(asset + '-PERP');
-      const price = n(ticker?.I ?? ticker?.M);
+      const currencies = await publicClient.marketData.getAllCurrencies();
+      const row: any = (currencies as any[]).find((item) => String(item.currency).toUpperCase() === asset);
+      const price = n(row?.spot_price);
       if (price) onPrice(price);
     } catch {
-      // Keep the last known price and retry on the next interval.
+      // Keep the last known price and retry.
     }
   };
 
@@ -154,17 +168,16 @@ export async function subscribeSpot(asset: string, onPrice: (price: number) => v
       await publicClient.connect();
       publicWsConnected = true;
     }
-    const tickerChannel = (channel as any)('ticker_slim.{instrument_name}.{interval}', {
-      instrument_name: asset + '-PERP',
-      interval: '100',
-    });
-    subscription = await publicClient.subscriptions.subscribe(tickerChannel, (ticker: any) => {
-      const price = n(ticker?.I ?? ticker?.M);
+    const spotChannel = channel('spot_feed.{currency}', { currency: asset });
+    subscription = await publicClient.subscriptions.subscribe(spotChannel, (payload: any) => {
+      const feeds = payload?.feeds ?? {};
+      const direct = feeds?.[asset] ?? feeds?.[asset + '-USD'] ?? Object.values(feeds)[0];
+      const price = n((direct as any)?.price);
       if (price) onPrice(price);
     });
   } catch {
     await poll();
-    timer = setInterval(poll, 4000);
+    timer = setInterval(poll, 5000);
   }
 
   return () => {
