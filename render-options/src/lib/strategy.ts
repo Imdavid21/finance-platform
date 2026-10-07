@@ -131,7 +131,7 @@ export function normalizeTicker(name: string, raw: any): TickerPoint {
     }
     return 0;
   };
-  let iv = pick(raw?.iv, raw?.mark_iv, raw?.markIv, raw?.option_pricing?.iv, raw?.greeks?.iv);
+  let iv = pick(raw?.iv, raw?.mark_iv, raw?.markIv, raw?.option_pricing?.i, raw?.option_pricing?.iv, raw?.greeks?.iv);
   if (iv > 3) iv /= 100;
   return {
     instrumentName: name,
@@ -139,7 +139,7 @@ export function normalizeTicker(name: string, raw: any): TickerPoint {
     bid: pick(raw?.b, raw?.best_bid_price, raw?.bestBidPrice, raw?.bid),
     ask: pick(raw?.a, raw?.best_ask_price, raw?.bestAskPrice, raw?.ask),
     iv: iv || undefined,
-    delta: pick(raw?.delta, raw?.greeks?.delta) || undefined,
+    delta: pick(raw?.option_pricing?.d, raw?.delta, raw?.greeks?.delta) || undefined,
     timestamp: pick(raw?.t, raw?.timestamp) || undefined,
   };
 }
