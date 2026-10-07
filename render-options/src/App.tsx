@@ -5,6 +5,7 @@ import {
   disconnectTradingSession,
   executeFirmQuote,
   loadAssetCatalog,
+  loadExpiryTickers,
   loadMarket,
   requestFirmQuote,
   restoreTradingSession,
@@ -174,6 +175,7 @@ function App() {
   const [asset, setAsset] = useState('ETH');
   const [market, setMarket] = useState<MarketState | null>(null);
   const [loadingMarket, setLoadingMarket] = useState(true);
+  const [pricingLoading, setPricingLoading] = useState(false);
   const [marketError, setMarketError] = useState('');
   const [panel, setPanel] = useState<Panel>(null);
   const [desiredProfit, setDesiredProfit] = useState(3000);
@@ -257,6 +259,29 @@ function App() {
       stop?.();
     };
   }, [asset]);
+
+  useEffect(() => {
+    if (!expiry) return;
+    let active = true;
+    setPricingLoading(true);
+    loadExpiryTickers(asset, expiry)
+      .then((tickers) => {
+        if (!active) return;
+        setMarket((current) => {
+          if (!current || current.asset !== asset) return current;
+          return { ...current, tickers };
+        });
+      })
+      .catch((error) => {
+        if (active) setMarketError(error instanceof Error ? error.message : 'Could not load Derive option prices.');
+      })
+      .finally(() => {
+        if (active) setPricingLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [asset, expiry]);
 
   useEffect(() => {
     const timer = setInterval(() => setClock(Date.now()), 500);
@@ -519,7 +544,7 @@ function App() {
             <span className="strategy-pill">Call spread</span>
             <span className="live-pill"><i /> Derive V3 testnet</span>
           </div>
-          <div className="feed-state">{loadingMarket ? 'Syncing option chain…' : marketError ? 'Feed issue' : 'Live market data'}</div>
+          <div className="feed-state">{loadingMarket ? 'Syncing option chain…' : pricingLoading ? 'Pricing selected expiry…' : marketError ? 'Feed issue' : 'Live market data'}</div>
         </div>
 
         <div className="sentence">
@@ -585,7 +610,7 @@ function App() {
                   <span className={row.change24h >= 0 ? 'positive-text' : 'negative-text'}>
                     {row.change24h ? (row.change24h > 0 ? '+' : '') + row.change24h.toFixed(1) + '%' : 'live'}
                   </span>
-                  <small>{row.optionCount} options</small>
+                  <small>{row.optionCount ? row.optionCount + ' options' : 'options'}</small>
                 </button>
               ))}
             </div>
@@ -632,23 +657,16 @@ function App() {
               <div className="panel-title">Choose settlement date</div>
               <div className="expiry-list">
                 {expiries.slice(0, 10).map((item) => {
-                  const itemPreview = market && target ? compileBullCallSpread({
-                    options: market.options,
-                    tickers: market.tickers,
-                    spot: market.spot,
-                    target,
-                    desiredProfit,
-                    expiryMs: item,
-                  }) : null;
+                  const isSelected = expiry === item;
                   return (
-                    <button className={'expiry-row ' + (expiry === item ? 'selected' : '')} key={item} onClick={() => {
+                    <button className={'expiry-row ' + (isSelected ? 'selected' : '')} key={item} onClick={() => {
                       setExpiry(item);
                       setPanel(null);
                       setFirm(null);
                     }}>
                       <span><strong>{dateLabel(item)}</strong><small>{dte(item)} days</small></span>
-                      <span><small>Prob.</small><strong>{itemPreview ? Math.round(itemPreview.probability * 100) + '%' : '—'}</strong></span>
-                      <span><small>Cost</small><strong>{itemPreview ? money(itemPreview.estimatedDebit) : '—'}</strong></span>
+                      <span><small>Prob.</small><strong>{isSelected && preview ? Math.round(preview.probability * 100) + '%' : 'price on select'}</strong></span>
+                      <span><small>Cost</small><strong>{isSelected && preview ? money(preview.estimatedDebit) : '—'}</strong></span>
                     </button>
                   );
                 })}
@@ -670,11 +688,11 @@ function App() {
       <div className="bottom-dock">
         <div className="dock-copy">
           <span>Indicative debit</span>
-          <strong>{preview ? money(preview.estimatedDebit, 2) : loadingMarket ? 'Loading…' : 'Unavailable'}</strong>
+          <strong>{preview ? money(preview.estimatedDebit, 2) : (loadingMarket || pricingLoading) ? 'Loading…' : 'Unavailable'}</strong>
         </div>
         <button
           className="buy-button"
-          disabled={!preview || loadingMarket}
+          disabled={!preview || loadingMarket || pricingLoading}
           onClick={() => {
             setPanel(null);
             setFirm(null);
