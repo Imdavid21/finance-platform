@@ -84,10 +84,12 @@ export async function loadAssetCatalog(): Promise<AssetSummary[]> {
   const counts = await Promise.all(CANDIDATES.map((symbol) => optionCount(symbol)));
   return CANDIDATES.map((symbol, index) => {
     const row = priceMap.get(symbol);
+    const spot = n(row?.spot_price);
+    const spot24h = n(row?.spot_price_24h);
     return {
       symbol,
-      spot: n(row?.spot_price),
-      change24h: n(row?.spot_change_24h ?? row?.change_24h ?? row?.stats?.price_change),
+      spot,
+      change24h: spot24h > 0 ? ((spot / spot24h) - 1) * 100 : 0,
       optionCount: counts[index],
     };
   }).filter((asset) => asset.optionCount > 0 && asset.spot > 0);
@@ -104,13 +106,13 @@ async function fetchAllOptions(asset: string): Promise<OptionContract[]> {
       pageSize: 250,
     });
     for (const raw of result?.instruments ?? []) {
+      if (raw?.is_active === false) continue;
       const parsed = parseOptionInstrument(raw);
       if (parsed) all.push(parsed);
     }
     const pagination = result?.pagination ?? {};
-    const count = n(pagination.count);
-    const pageSize = n(pagination.page_size ?? pagination.pageSize, 250);
-    if (!count || all.length >= count || (result?.instruments?.length ?? 0) < pageSize) break;
+    const numPages = n(pagination.num_pages, 1);
+    if (page >= numPages) break;
     page += 1;
   }
   return all;
@@ -395,12 +397,10 @@ export async function requestFirmQuote(session: TradingSession, preview: SpreadP
         { instrumentName: preview.short.name, amount: (-preview.quantity).toString() },
       ],
     });
-    marginAfter = n(
-      margin?.initial_margin ??
-      margin?.initial_margin_requirement ??
-      margin?.margin?.initial_margin ??
-      margin?.margin_requirement,
-    ) || undefined;
+    if (margin?.is_valid_trade === false) {
+      throw new Error('Derive margin simulation rejected this spread for the selected subaccount.');
+    }
+    marginAfter = n(margin?.post_initial_margin) || undefined;
   } catch {
     marginAfter = undefined;
   }
