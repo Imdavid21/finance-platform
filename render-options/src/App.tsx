@@ -177,6 +177,7 @@ function App() {
   const [loadingMarket, setLoadingMarket] = useState(true);
   const [pricingLoading, setPricingLoading] = useState(false);
   const [marketError, setMarketError] = useState('');
+  const [marketRetry, setMarketRetry] = useState(0);
   const [panel, setPanel] = useState<Panel>(null);
   const [desiredProfit, setDesiredProfit] = useState(3000);
   const [target, setTarget] = useState(0);
@@ -258,7 +259,7 @@ function App() {
       active = false;
       stop?.();
     };
-  }, [asset]);
+  }, [asset, marketRetry]);
 
   useEffect(() => {
     if (!expiry) return;
@@ -675,7 +676,15 @@ function App() {
           )}
         </div>
 
-        {marketError && <div className="market-error">{marketError}</div>}
+        {marketError && (
+          <div className="market-error">
+            <span>{marketError}</span>
+            <button onClick={() => {
+              setMarketError('');
+              setMarketRetry((value) => value + 1);
+            }}>Retry data</button>
+          </div>
+        )}
 
         <div className="derived-strip">
           <div><span>Reference</span><strong>{market ? money(market.spot, market.spot < 10 ? 3 : 0) : '—'}</strong></div>
