@@ -8,6 +8,8 @@ export interface OptionContract {
   side: OptionSide;
   tickSize: number;
   amountStep: number;
+  minimumAmount: number;
+  maximumAmount: number;
 }
 
 export interface TickerPoint {
@@ -120,6 +122,8 @@ export function parseOptionInstrument(raw: any): OptionContract | null {
     side,
     tickSize: Math.max(num(raw?.tick_size ?? raw?.tickSize, 0.01), 0.00000001),
     amountStep: Math.max(num(raw?.amount_step ?? raw?.amountStep, 0.01), 0.00000001),
+    minimumAmount: Math.max(num(raw?.minimum_amount ?? raw?.minimumAmount, 0), 0),
+    maximumAmount: Math.max(num(raw?.maximum_amount ?? raw?.maximumAmount, Number.MAX_SAFE_INTEGER), 0),
   };
 }
 
@@ -170,9 +174,17 @@ export function nearestStrike(strikes: number[], value: number): number {
   return strikes.reduce((best, strike) => (Math.abs(strike - value) < Math.abs(best - value) ? strike : best), strikes[0]);
 }
 
+function decimalsForStep(step: number): number {
+  const text = step.toString().toLowerCase();
+  if (text.includes('e-')) return Number(text.split('e-')[1]);
+  return (text.split('.')[1] ?? '').length;
+}
+
 function ceilToStep(value: number, step: number): number {
   if (!Number.isFinite(value) || value <= 0) return step;
-  return Math.ceil((value - 1e-12) / step) * step;
+  const decimals = Math.min(12, decimalsForStep(step));
+  const rounded = Math.ceil((value - 1e-12) / step) * step;
+  return Number(rounded.toFixed(decimals));
 }
 
 function erf(x: number): number {
@@ -241,7 +253,10 @@ export function compileBullCallSpread(args: {
   if (maxProfitPerUnit <= 0) return null;
 
   const step = Math.max(long.amountStep, short.amountStep);
-  const quantity = ceilToStep(args.desiredProfit / maxProfitPerUnit, step);
+  const minimum = Math.max(long.minimumAmount, short.minimumAmount);
+  const maximum = Math.min(long.maximumAmount, short.maximumAmount);
+  const quantity = Math.max(minimum, ceilToStep(args.desiredProfit / maxProfitPerUnit, step));
+  if (!Number.isFinite(quantity) || quantity <= 0 || quantity > maximum) return null;
   const estimatedDebit = debitPerUnit * quantity;
   const maxProfit = maxProfitPerUnit * quantity;
   const probability = riskNeutralFinishProbability(
