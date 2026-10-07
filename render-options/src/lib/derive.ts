@@ -16,6 +16,12 @@ import {
 
 export const NETWORK = 'testnet' as const;
 export const TESTNET_APP_URL = 'https://testnet.app.derive.xyz/developers';
+export const API_BASE = 'https://intent-options-api.onrender.com';
+const PROXY_NETWORK = {
+  ...NETWORKS.testnet,
+  httpUrl: API_BASE + '/derive',
+  wsUrl: 'wss://intent-options-api.onrender.com/ws',
+};
 
 export interface AssetSummary {
   symbol: string;
@@ -54,7 +60,7 @@ declare global {
   }
 }
 
-const publicClient = new DeriveClient({ network: NETWORK, requestTimeoutMs: 8_000 });
+const publicClient = new DeriveClient({ network: PROXY_NETWORK, requestTimeoutMs: 8_000 });
 let publicWsConnected = false;
 let tradingSession: TradingSession | null = null;
 
@@ -111,39 +117,26 @@ async function fetchAllOptions(asset: string): Promise<OptionContract[]> {
 }
 
 export async function loadMarket(asset: string): Promise<MarketState> {
-  const [currencies, rawTickers] = await Promise.all([
+  const [currencies, options] = await Promise.all([
     publicClient.marketData.getAllCurrencies(),
-    publicClient.marketData.getTickers({ instrumentType: 'option', currency: asset }),
+    fetchAllOptions(asset),
   ]);
   const currency = (currencies as any[]).find((row) => String(row.currency).toUpperCase() === asset);
-  const tickers = normalizeTickers(rawTickers);
-
-  // For first paint, derive strike/expiry metadata from the canonical instrument
-  // names returned by get_tickers. Exact venue size constraints are resolved
-  // lazily when a user requests a firm RFQ.
-  let options = [...tickers.keys()]
-    .map((name) => parseOptionInstrument({
-      instrument_name: name,
-      base_currency: asset,
-      tick_size: '0.01',
-      amount_step: '0.01',
-      minimum_amount: '0.01',
-      maximum_amount: '1000000',
-    }))
-    .filter((option): option is OptionContract => Boolean(option));
-
-  // If a venue ever changes its option naming convention, fall back to the
-  // canonical instrument endpoint instead of leaving the builder empty.
-  if (options.length < 2) {
-    options = await fetchAllOptions(asset);
-  }
-
   return {
     asset,
     spot: n(currency?.spot_price),
     options,
-    tickers,
+    tickers: new Map(),
   };
+}
+
+export async function loadExpiryTickers(asset: string, expiryMs: number): Promise<Map<string, TickerPoint>> {
+  const raw = await publicClient.marketData.getTickers({
+    instrumentType: 'option',
+    currency: asset,
+    expiryDate: Math.floor(expiryMs / 1000),
+  });
+  return normalizeTickers(raw);
 }
 
 export async function subscribeSpot(asset: string, onPrice: (price: number) => void): Promise<() => void> {
@@ -204,10 +197,10 @@ async function authHeaders(signer: JsonRpcSigner, ownerAddress: string) {
 }
 
 async function rpcWithOwner(signer: JsonRpcSigner, ownerAddress: string, method: string, params: any) {
-  const response = await fetch(NETWORKS.testnet.httpUrl, {
+  const response = await fetch(API_BASE + '/derive/' + method, {
     method: 'POST',
     headers: await authHeaders(signer, ownerAddress),
-    body: JSON.stringify({ id: Date.now(), method, params }),
+    body: JSON.stringify(params),
   });
   const payload = await response.json();
   if (!response.ok || payload?.error) {
@@ -298,7 +291,7 @@ async function registerSessionKey(signer: JsonRpcSigner, ownerAddress: string, s
 
 async function loginWithSession(ownerAddress: string, privateKey: string): Promise<TradingSession> {
   const client = new DeriveClient({
-    network: NETWORK,
+    network: PROXY_NETWORK,
     sessionKey: privateKey,
     ownerAddress,
   });
