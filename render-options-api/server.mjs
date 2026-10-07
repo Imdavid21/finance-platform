@@ -61,6 +61,7 @@ const server = http.createServer(async (req, res) => {
   }
 
   const method = decodeURIComponent(req.url.slice('/derive/'.length));
+  console.log(JSON.stringify({ type: 'http_proxy', method, origin: req.headers.origin || null }));
   if (!allowedHttpMethods.has(method)) {
     res.writeHead(403, { 'content-type': 'application/json' });
     res.end(JSON.stringify({ error: 'method_not_allowed', method }));
@@ -118,6 +119,7 @@ server.on('upgrade', (req, socket, head) => {
   }
 
   wss.handleUpgrade(req, socket, head, (client) => {
+    console.log(JSON.stringify({ type: 'ws_proxy_open', origin: origin || null }));
     const upstream = new WebSocket(DERIVE_WS, {
       headers: { 'user-agent': 'intent-options-api/1.0' },
     });
