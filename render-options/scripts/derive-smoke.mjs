@@ -50,13 +50,19 @@ if (!expiry) {
   console.error('No option expiry discovered');
   process.exitCode = 1;
 } else {
+  const date = new Date(Number(expiry) * 1000);
+  const expiryDate = Number(
+    String(date.getUTCFullYear()) +
+    String(date.getUTCMonth() + 1).padStart(2, '0') +
+    String(date.getUTCDate()).padStart(2, '0')
+  );
   const tickers = await post('public/get_tickers', {
     instrument_type: 'option',
     currency: 'ETH',
-    expiry_date: expiry,
+    expiry_date: expiryDate,
   });
   const names = Object.keys(tickers?.result?.tickers ?? {});
-  console.log('ETH option ticker count for expiry', expiry, ':', names.length, 'sample:', names.slice(0, 5));
+  console.log('ETH option ticker count for expiry', expiryDate, ':', names.length, 'sample:', names.slice(0, 5));
   if (names.length < 2) {
     console.error('Not enough ETH option tickers for selected expiry');
     process.exitCode = 1;
