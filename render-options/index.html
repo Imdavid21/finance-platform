@@ -9,6 +9,11 @@
   </head>
   <body>
     <div id="root"></div>
+    <script>
+      if (location.hostname === 'intent-options-builder.onrender.com') {
+        location.replace('https://intent-options-v3.onrender.com' + location.pathname + location.search + location.hash);
+      }
+    </script>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>
