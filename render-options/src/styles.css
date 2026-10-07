@@ -424,3 +424,146 @@ mark { color:inherit; border-radius:9px; padding:0 5px 2px; }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration:.001ms!important; animation-iteration-count:1!important; transition-duration:.001ms!important; scroll-behavior:auto!important; }
 }
+
+
+/* Mobile product pass: normal document flow, safe areas, compact controls. */
+.market-error {
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:12px;
+}
+.market-error button {
+  flex:0 0 auto;
+  border:0;
+  border-radius:12px;
+  background:#9d3e47;
+  color:#fff;
+  padding:7px 10px;
+  font-size:11px;
+  font-weight:800;
+  cursor:pointer;
+}
+
+@media (max-width: 650px) {
+  body { min-height:100dvh; }
+  .app-shell {
+    min-height:100dvh;
+    overflow:visible;
+    padding-top:calc(env(safe-area-inset-top, 0px) + 70px);
+    padding-bottom:calc(env(safe-area-inset-bottom, 0px) + 102px);
+  }
+  .topbar {
+    top:calc(env(safe-area-inset-top, 0px) + 8px);
+    left:10px;
+    right:10px;
+    height:44px;
+  }
+  .brand, .wallet-button {
+    height:40px;
+    box-shadow:0 5px 18px rgba(40,32,25,.07);
+  }
+  .brand {
+    padding:0 11px 0 6px;
+    gap:7px;
+    font-size:16px;
+  }
+  .brand-orb { width:28px; height:28px; }
+  .wallet-button { padding:0 14px; font-size:13px; }
+  .builder {
+    position:relative;
+    top:auto;
+    left:auto;
+    transform:none;
+    width:auto;
+    margin:0 12px;
+  }
+  .builder-meta {
+    margin:4px 0 14px;
+    align-items:center;
+  }
+  .meta-cluster { gap:7px; min-width:0; }
+  .strategy-pill {
+    padding:7px 10px;
+    font-size:10px;
+    white-space:nowrap;
+  }
+  .live-pill {
+    min-width:0;
+    padding:7px 10px;
+    font-size:10px;
+    white-space:nowrap;
+    overflow:hidden;
+    text-overflow:ellipsis;
+  }
+  .sentence {
+    max-width:100%;
+    font-size:clamp(31px, 9.1vw, 38px);
+    line-height:.98;
+    gap:6px 7px;
+    letter-spacing:-.055em;
+  }
+  .intent-chip {
+    border-radius:18px;
+    padding:5px 10px 8px;
+    gap:7px;
+  }
+  .panel-stage {
+    min-height:0;
+    margin-top:16px;
+  }
+  .control-panel, .asset-panel, .target-panel, .expiry-panel {
+    width:100%;
+    border-radius:22px;
+    padding:14px;
+    box-shadow:0 16px 40px rgba(34,29,24,.10);
+  }
+  .panel-head { margin-bottom:11px; }
+  .panel-head strong { font-size:24px; }
+  .mini-note { padding:5px 8px; font-size:10px; }
+  .price-readout { gap:7px; }
+  .price-readout > div { min-height:46px; padding:9px 11px; }
+  .smooth-slider { margin-top:16px; padding-top:10px; }
+  .loading-lines { gap:7px; padding:4px 0; }
+  .loading-lines span { height:28px; border-radius:12px; }
+  .panel-foot { margin-top:11px; padding-top:11px; }
+  .method-note { font-size:9px; }
+  .derived-strip {
+    margin-top:12px;
+    padding-bottom:8px;
+  }
+  .derived-strip > div {
+    min-width:calc(50% - 4px);
+    padding:8px 10px;
+    border-radius:14px;
+  }
+  .market-error {
+    margin-top:10px;
+    padding:9px 10px;
+    border-radius:14px;
+    font-size:11px;
+  }
+  .bottom-dock {
+    width:calc(100vw - 16px);
+    min-width:0;
+    left:8px;
+    right:8px;
+    bottom:calc(env(safe-area-inset-bottom, 0px) + 8px);
+    transform:none;
+    height:64px;
+    padding:7px 7px 7px 14px;
+    border-radius:32px;
+  }
+  .dock-copy strong { font-size:15px; }
+  .buy-button {
+    height:48px;
+    padding-left:16px;
+    gap:10px;
+    font-size:14px;
+  }
+  .buy-button span { width:32px; height:32px; }
+  .review-grid {
+    width:calc(100vw - 18px);
+    margin:calc(env(safe-area-inset-top, 0px) + 72px) auto calc(env(safe-area-inset-bottom, 0px) + 30px);
+  }
+}
