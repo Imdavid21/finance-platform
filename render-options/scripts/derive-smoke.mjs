@@ -6,7 +6,7 @@ async function post(path, body) {
     method: 'POST',
     headers: {
       'content-type': 'application/json',
-      'origin': origin,
+      origin,
       'user-agent': 'intent-options-smoke/1.0',
     },
     body: JSON.stringify(body),
@@ -18,8 +18,7 @@ async function post(path, body) {
     path,
     status: res.status,
     allowOrigin: res.headers.get('access-control-allow-origin'),
-    allowHeaders: res.headers.get('access-control-allow-headers'),
-    preview: typeof data === 'string' ? data.slice(0, 300) : data,
+    error: data?.error ?? null,
   }, null, 2));
   if (!res.ok || data?.error) process.exitCode = 1;
   return data;
@@ -32,13 +31,36 @@ if (!eth?.spot_price) {
   process.exitCode = 1;
 }
 
-const tickers = await post('public/get_tickers', { instrument_type: 'option', currency: 'ETH' });
-const tickerMap = tickers?.result?.tickers ?? {};
-const names = Object.keys(tickerMap);
-console.log('ETH option ticker count:', names.length, 'sample:', names.slice(0, 5));
-if (names.length < 2) {
-  console.error('Not enough ETH option tickers for builder');
+const instruments = await post('public/get_all_instruments', {
+  instrument_type: 'option',
+  expired: false,
+  currency: 'ETH',
+  page: 1,
+  page_size: 100,
+});
+const rows = instruments?.result?.instruments ?? [];
+console.log('ETH option instrument count on page:', rows.length);
+if (rows.length < 2) {
+  console.error('Not enough ETH option instruments');
   process.exitCode = 1;
+}
+
+const expiry = rows.find((row) => row?.option_details?.expiry)?.option_details?.expiry;
+if (!expiry) {
+  console.error('No option expiry discovered');
+  process.exitCode = 1;
+} else {
+  const tickers = await post('public/get_tickers', {
+    instrument_type: 'option',
+    currency: 'ETH',
+    expiry_date: expiry,
+  });
+  const names = Object.keys(tickers?.result?.tickers ?? {});
+  console.log('ETH option ticker count for expiry', expiry, ':', names.length, 'sample:', names.slice(0, 5));
+  if (names.length < 2) {
+    console.error('Not enough ETH option tickers for selected expiry');
+    process.exitCode = 1;
+  }
 }
 
 const opt = await fetch(base + '/public/get_all_instruments', {
@@ -54,5 +76,5 @@ console.log(JSON.stringify({
   status: opt.status,
   allowOrigin: opt.headers.get('access-control-allow-origin'),
   allowMethods: opt.headers.get('access-control-allow-methods'),
-  allowHeaders: opt.headers.get('access-control-allow-headers'),
+  note: 'Direct browser REST is intentionally not used by the app; Render gateway supplies CORS.',
 }, null, 2));
