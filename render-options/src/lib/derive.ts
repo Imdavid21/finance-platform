@@ -60,8 +60,8 @@ declare global {
   }
 }
 
-const publicClient = new DeriveClient({ network: PROXY_NETWORK, requestTimeoutMs: 8_000 });
-let publicWsConnected = false;
+const streamClient = new DeriveClient({ network: PROXY_NETWORK, requestTimeoutMs: 20_000 });
+let streamWsConnected = false;
 let tradingSession: TradingSession | null = null;
 
 const CANDIDATES = ['ETH', 'BTC', 'SOL', 'HYPE', 'SFP', 'DOGE'];
@@ -71,8 +71,44 @@ function n(value: unknown, fallback = 0): number {
   return Number.isFinite(parsed) ? parsed : fallback;
 }
 
+async function proxyRpc<T = any>(method: string, params: Record<string, unknown>, retries = 1): Promise<T> {
+  let lastError: unknown;
+  for (let attempt = 0; attempt <= retries; attempt += 1) {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 20_000);
+    try {
+      const response = await fetch(API_BASE + '/derive/' + method, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(params),
+        cache: 'no-store',
+        credentials: 'omit',
+        signal: controller.signal,
+      });
+      const payload = await response.json().catch(() => null);
+      if (!response.ok || payload?.error) {
+        const detail = payload?.error?.data ?? payload?.error?.message ?? ('HTTP ' + response.status);
+        throw new Error(String(detail));
+      }
+      return payload.result as T;
+    } catch (error) {
+      lastError = error;
+      if (attempt < retries) {
+        await new Promise((resolve) => setTimeout(resolve, 650 * (attempt + 1)));
+        continue;
+      }
+    } finally {
+      clearTimeout(timeout);
+    }
+  }
+  if (lastError instanceof DOMException && lastError.name === 'AbortError') {
+    throw new Error('Derive gateway timed out. Retry in a few seconds.');
+  }
+  throw lastError instanceof Error ? lastError : new Error('Derive gateway request failed.');
+}
+
 export async function loadAssetCatalog(): Promise<AssetSummary[]> {
-  const currencies = await publicClient.marketData.getAllCurrencies();
+  const currencies = await proxyRpc<any[]>('public/get_all_currencies', {});
   return (currencies as any[])
     .filter((row) => row?.option && n(row?.spot_price) > 0)
     .map((row) => {
@@ -97,11 +133,12 @@ async function fetchAllOptions(asset: string): Promise<OptionContract[]> {
   const all: OptionContract[] = [];
   let page = 1;
   for (let safety = 0; safety < 20; safety += 1) {
-    const result: any = await publicClient.marketData.getInstruments({
-      instrumentType: 'option',
+    const result: any = await proxyRpc('public/get_all_instruments', {
+      instrument_type: 'option',
+      expired: false,
       currency: asset,
       page,
-      pageSize: 100,
+      page_size: 100,
     });
     for (const raw of result?.instruments ?? []) {
       if (raw?.is_active === false) continue;
@@ -118,7 +155,7 @@ async function fetchAllOptions(asset: string): Promise<OptionContract[]> {
 
 export async function loadMarket(asset: string): Promise<MarketState> {
   const [currencies, options] = await Promise.all([
-    publicClient.marketData.getAllCurrencies(),
+    proxyRpc<any[]>('public/get_all_currencies', {}),
     fetchAllOptions(asset),
   ]);
   const currency = (currencies as any[]).find((row) => String(row.currency).toUpperCase() === asset);
@@ -139,10 +176,10 @@ function expiryDateWire(expiryMs: number): number {
 }
 
 export async function loadExpiryTickers(asset: string, expiryMs: number): Promise<Map<string, TickerPoint>> {
-  const raw = await publicClient.marketData.getTickers({
-    instrumentType: 'option',
+  const raw = await proxyRpc<any>('public/get_tickers', {
+    instrument_type: 'option',
     currency: asset,
-    expiryDate: expiryDateWire(expiryMs),
+    expiry_date: expiryDateWire(expiryMs),
   });
   return normalizeTickers(raw);
 }
@@ -155,30 +192,34 @@ export async function subscribeSpot(asset: string, onPrice: (price: number) => v
   const poll = async () => {
     if (stopped) return;
     try {
-      const currencies = await publicClient.marketData.getAllCurrencies();
-      const row: any = (currencies as any[]).find((item) => String(item.currency).toUpperCase() === asset);
+      const currencies = await proxyRpc<any[]>('public/get_all_currencies', {}, 0);
+      const row: any = currencies.find((item) => String(item.currency).toUpperCase() === asset);
       const price = n(row?.spot_price);
       if (price) onPrice(price);
     } catch {
-      // Keep the last known price and retry.
+      // Streaming is additive. Never let it break the loaded market state.
     }
   };
 
+  // Start with polling immediately. It is reliable on mobile Safari and
+  // provides a fallback even if the websocket is reconnecting.
+  await poll();
+  timer = setInterval(poll, 5000);
+
   try {
-    if (!publicWsConnected) {
-      await publicClient.connect();
-      publicWsConnected = true;
+    if (!streamWsConnected) {
+      await streamClient.connect();
+      streamWsConnected = true;
     }
     const spotChannel = channel('spot_feed.{currency}', { currency: asset });
-    subscription = await publicClient.subscriptions.subscribe(spotChannel, (payload: any) => {
+    subscription = await streamClient.subscriptions.subscribe(spotChannel, (payload: any) => {
       const feeds = payload?.feeds ?? {};
       const direct = feeds?.[asset] ?? feeds?.[asset + '-USD'] ?? Object.values(feeds)[0];
       const price = n((direct as any)?.price);
       if (price) onPrice(price);
     });
   } catch {
-    await poll();
-    timer = setInterval(poll, 5000);
+    // Polling continues. The builder must remain usable without websocket streaming.
   }
 
   return () => {
