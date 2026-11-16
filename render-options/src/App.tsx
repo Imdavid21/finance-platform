@@ -51,6 +51,22 @@ const fullDateLabel = (ms: number) =>
 
 const dte = (ms: number) => Math.max(0, Math.ceil((ms - Date.now()) / 86_400_000));
 
+function readStore(key: string, fallback: string) {
+  try {
+    return localStorage.getItem(key) ?? fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+function writeStore(key: string, value: string) {
+  try {
+    localStorage.setItem(key, value);
+  } catch {
+    // Storage can be blocked in private mode. Preferences are a convenience only.
+  }
+}
+
 function clamp(v: number, min: number, max: number) {
   return Math.min(max, Math.max(min, v));
 }
@@ -62,10 +78,11 @@ function SmoothSlider(props: {
   step?: number;
   marks?: number[];
   format?: (v: number) => string;
+  label?: string;
   onPreview?: (v: number) => void;
   onCommit: (v: number) => void;
 }) {
-  const { value, min, max, step = 1, marks = [], format = (v) => String(v), onPreview, onCommit } = props;
+  const { value, min, max, step = 1, marks = [], format = (v) => String(v), label = 'Value', onPreview, onCommit } = props;
   const trackRef = useRef<HTMLDivElement | null>(null);
   const dragging = useRef(false);
   const frame = useRef<number | null>(null);
@@ -138,11 +155,17 @@ function SmoothSlider(props: {
           aria-valuemin={min}
           aria-valuemax={max}
           aria-valuenow={visual}
+          aria-valuetext={format(visual)}
+          aria-label={label}
           onKeyDown={(e) => {
-            if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
+            const keys = ['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End', 'PageUp', 'PageDown'];
+            if (!keys.includes(e.key)) return;
             e.preventDefault();
-            const direction = e.key === 'ArrowRight' ? 1 : -1;
-            const nextRaw = clamp(visual + direction * step, min, max);
+            const big = e.key === 'PageUp' || e.key === 'PageDown';
+            const direction = e.key === 'ArrowRight' || e.key === 'ArrowUp' || e.key === 'PageUp' ? 1 : -1;
+            let nextRaw = clamp(visual + direction * step * (big ? 10 : 1), min, max);
+            if (e.key === 'Home') nextRaw = min;
+            if (e.key === 'End') nextRaw = max;
             const next = snap(nextRaw);
             setVisual(next);
             onPreview?.(next);
@@ -172,14 +195,14 @@ function LoadingLines() {
 
 function App() {
   const [assets, setAssets] = useState<AssetSummary[]>([]);
-  const [asset, setAsset] = useState('ETH');
+  const [asset, setAsset] = useState(() => readStore('io-asset', 'ETH'));
   const [market, setMarket] = useState<MarketState | null>(null);
   const [loadingMarket, setLoadingMarket] = useState(true);
   const [pricingLoading, setPricingLoading] = useState(false);
   const [marketError, setMarketError] = useState('');
   const [marketRetry, setMarketRetry] = useState(0);
   const [panel, setPanel] = useState<Panel>(null);
-  const [desiredProfit, setDesiredProfit] = useState(3000);
+  const [desiredProfit, setDesiredProfit] = useState(() => clamp(Number(readStore('io-profit', '3000')) || 3000, 100, 100000));
   const [target, setTarget] = useState(0);
   const [expiry, setExpiry] = useState(0);
   const [phase, setPhase] = useState<Phase>('builder');
@@ -285,6 +308,20 @@ function App() {
   }, [asset, expiry]);
 
   useEffect(() => {
+    writeStore('io-asset', asset);
+    writeStore('io-profit', String(desiredProfit));
+  }, [asset, desiredProfit]);
+
+  useEffect(() => {
+    if (!panel) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setPanel(null);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [panel]);
+
+  useEffect(() => {
     const timer = setInterval(() => setClock(Date.now()), 500);
     return () => clearInterval(timer);
   }, []);
@@ -387,7 +424,6 @@ function App() {
       <main className="app-shell result-screen">
         <div className="result-card">
           <div className="success-orb">✓</div>
-          <p className="eyebrow">DERIVE V3 TESTNET</p>
           <h1>Spread submitted.</h1>
           <p>
             {number(preview.quantity, 4)}× {preview.long.name} / {preview.short.name}
@@ -397,7 +433,11 @@ function App() {
             <div><span>Max profit</span><strong>{money(finalEconomics.maxProfit, 2)}</strong></div>
             <div><span>Status</span><strong>{String(fill?.status ?? 'submitted')}</strong></div>
           </div>
-          <pre className="fill-json">{JSON.stringify(fill, null, 2)}</pre>
+          <p className="result-note">Submitted to Derive testnet. Fills can take a few seconds to settle in your subaccount.</p>
+          <details className="fill-details">
+            <summary>Raw response</summary>
+            <pre className="fill-json">{JSON.stringify(fill, null, 2)}</pre>
+          </details>
           <button className="primary wide" onClick={() => {
             setPhase('builder');
             setFirm(null);
@@ -434,8 +474,7 @@ function App() {
           <div className="review-card">
             <div className="review-heading">
               <div>
-                <p className="eyebrow">DEFINED-RISK CALL SPREAD</p>
-                <h1>
+                      <h1>
                   Make up to <mark className="profit-mark">{money(finalEconomics.maxProfit)}</mark> if {asset} ends above{' '}
                   <mark className="target-mark">{money(preview.short.strike)}</mark> on{' '}
                   <mark className="expiry-mark">{fullDateLabel(expiry)}</mark>.
@@ -478,8 +517,7 @@ function App() {
           <aside className="quote-panel">
             <div className="quote-top">
               <div>
-                <p className="eyebrow">EXECUTION</p>
-                <h2>{firm ? 'Firm Derive RFQ' : 'Indicative preview'}</h2>
+                      <h2>{firm ? 'Firm Derive RFQ' : 'Indicative preview'}</h2>
               </div>
               <span className={'network-badge ' + (firm ? 'live' : '')}>{firm ? 'QUOTE LIVE' : 'TESTNET'}</span>
             </div>
@@ -488,6 +526,12 @@ function App() {
             <QuoteRow label="Subaccount" value={session ? '#' + session.subaccountId : '—'} />
             <QuoteRow label="Contracts" value={number(preview.quantity, 4) + ' × 2 legs'} />
             <QuoteRow label="Maximum debit" value={money(finalEconomics.debit, 2)} strong />
+            {firm && firm.debit ? (
+              <QuoteRow
+                label="Versus preview"
+                value={(firm.debit - preview.estimatedDebit <= 0 ? '−' : '+') + money(Math.abs(firm.debit - preview.estimatedDebit), 2)}
+              />
+            ) : null}
             <QuoteRow label="Maximum profit" value={money(finalEconomics.maxProfit, 2)} />
             <QuoteRow label="Maximum loss" value={money(finalEconomics.maxLoss, 2)} />
             <QuoteRow label="Breakeven" value={money(finalEconomics.breakEven, 2)} />
@@ -550,19 +594,19 @@ function App() {
 
         <div className="sentence">
           <span>I want to make</span>
-          <button className={'intent-chip profit ' + (panel === 'profit' ? 'active' : '')} onClick={() => setPanel(panel === 'profit' ? null : 'profit')}>
+          <button className={'intent-chip profit ' + (panel === 'profit' ? 'active' : '')} aria-expanded={panel === 'profit'} onClick={() => setPanel(panel === 'profit' ? null : 'profit')}>
             {money(desiredProfit)} <small>⌄</small>
           </button>
           <span>if</span>
-          <button className={'intent-chip asset ' + (panel === 'asset' ? 'active' : '')} onClick={() => setPanel(panel === 'asset' ? null : 'asset')}>
+          <button className={'intent-chip asset ' + (panel === 'asset' ? 'active' : '')} aria-expanded={panel === 'asset'} onClick={() => setPanel(panel === 'asset' ? null : 'asset')}>
             {asset} <small>⌄</small>
           </button>
           <span>ends above</span>
-          <button className={'intent-chip target ' + (panel === 'target' ? 'active' : '')} onClick={() => setPanel(panel === 'target' ? null : 'target')}>
+          <button className={'intent-chip target ' + (panel === 'target' ? 'active' : '')} aria-expanded={panel === 'target'} onClick={() => setPanel(panel === 'target' ? null : 'target')}>
             {target ? money(target) : '…'} <small>⌄</small>
           </button>
           <span>on</span>
-          <button className={'intent-chip expiry ' + (panel === 'expiry' ? 'active' : '')} onClick={() => setPanel(panel === 'expiry' ? null : 'expiry')}>
+          <button className={'intent-chip expiry ' + (panel === 'expiry' ? 'active' : '')} aria-expanded={panel === 'expiry'} onClick={() => setPanel(panel === 'expiry' ? null : 'expiry')}>
             {expiry ? dateLabel(expiry) : '…'} <small>⌄</small>
           </button>
         </div>
@@ -587,6 +631,7 @@ function App() {
                 min={100}
                 max={Math.max(10000, desiredProfit * 1.5)}
                 step={100}
+                label="Desired maximum profit"
                 format={(v) => '$' + compact(v)}
                 onCommit={(v) => setDesiredProfit(v)}
               />
@@ -640,6 +685,7 @@ function App() {
                   max={targetMax}
                   step={Math.max((targetMax - targetMin) / 120, 1)}
                   marks={targetStrikes}
+                  label="Target settlement price"
                   format={(v) => '$' + number(v, v < 10 ? 2 : 0)}
                   onPreview={(v) => setTarget(v)}
                   onCommit={(v) => setTarget(v)}
@@ -698,6 +744,7 @@ function App() {
         <div className="dock-copy">
           <span>Indicative debit</span>
           <strong>{preview ? money(preview.estimatedDebit, 2) : (loadingMarket || pricingLoading) ? 'Loading…' : 'Unavailable'}</strong>
+          {preview && <small className="dock-risk">Risk {money(preview.maxLoss)} to make {money(preview.maxProfit)}</small>}
         </div>
         <button
           className="buy-button"
